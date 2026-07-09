@@ -15,7 +15,7 @@ app.get('/api/spreads', async (req, res) => {
   if (!CMC_API_KEY) return res.status(500).json({ error: 'server misconfigured: no CMC key set' });
 
   try {
-    const url = `https://pro-api.coinmarketcap.com/v2/cryptocurrency/market-pairs/latest?symbol=${symbol}&limit=100`;
+    const url = `https://pro-api.coinmarketcap.com/v1/cryptocurrency/market-pairs/latest?symbol=${symbol}&limit=100`;
     const cmcRes = await fetch(url, {
       headers: {
         'X-CMC_PRO_API_KEY': CMC_API_KEY,
