@@ -78,4 +78,78 @@ app.get('/api/status/bybit', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+const OKX_API_KEY = process.env.OKX_API_KEY;
+const OKX_API_SECRET = process.env.OKX_API_SECRET;
+const OKX_API_PASSPHRASE = process.env.OKX_API_PASSPHRASE;
+const MEXC_API_KEY = process.env.MEXC_API_KEY;
+const MEXC_API_SECRET = process.env.MEXC_API_SECRET;
+
+app.get('/api/status/okx', async (req, res) => {
+  const coin = (req.query.coin || '').toUpperCase();
+  if (!coin) return res.status(400).json({ error: 'coin required' });
+  if (!OKX_API_KEY || !OKX_API_SECRET || !OKX_API_PASSPHRASE) {
+    return res.status(500).json({ error: 'ключи OKX не заданы на сервере' });
+  }
+
+  const requestPath = `/api/v5/asset/currencies?ccy=${coin}`;
+  const timestamp = new Date().toISOString();
+  const prehash = timestamp + 'GET' + requestPath;
+  const sign = crypto.createHmac('sha256', OKX_API_SECRET).update(prehash).digest('base64');
+
+  try {
+    const r = await fetch(`https://www.okx.com${requestPath}`, {
+      headers: {
+        'OK-ACCESS-KEY': OKX_API_KEY,
+        'OK-ACCESS-SIGN': sign,
+        'OK-ACCESS-TIMESTAMP': timestamp,
+        'OK-ACCESS-PASSPHRASE': OKX_API_PASSPHRASE,
+        'Content-Type': 'application/json'
+      }
+    });
+    const rawText = await r.text();
+    let data;
+    try { data = JSON.parse(rawText); }
+    catch (e) {
+      return res.status(502).json({ error: 'OKX ответил не JSON — вероятно, блокировка по региону', raw_response_preview: rawText.slice(0, 300) });
+    }
+    if (data.code !== '0') return res.status(400).json({ error: 'OKX отклонил запрос', detail: data.msg });
+    const rows = data.data || [];
+    if (rows.length === 0) return res.json({ coin, dep: false, wd: false, note: 'монета не найдена на OKX' });
+    const dep = rows.some(row => row.canDep);
+    const wd = rows.some(row => row.canWd);
+    res.json({ coin, dep, wd });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/status/mexc', async (req, res) => {
+  const coin = (req.query.coin || '').toUpperCase();
+  if (!coin) return res.status(400).json({ error: 'coin required' });
+  if (!MEXC_API_KEY || !MEXC_API_SECRET) {
+    return res.status(500).json({ error: 'ключи MEXC не заданы на сервере' });
+  }
+
+  const timestamp = Date.now();
+  const queryString = `timestamp=${timestamp}`;
+  const signature = crypto.createHmac('sha256', MEXC_API_SECRET).update(queryString).digest('hex');
+
+  try {
+    const r = await fetch(`https://api.mexc.com/api/v3/capital/config/getall?${queryString}&signature=${signature}`, {
+      headers: { 'X-MEXC-APIKEY': MEXC_API_KEY }
+    });
+    const rawText = await r.text();
+    let data;
+    try { data = JSON.parse(rawText); }
+    catch (e) {
+      return res.status(502).json({ error: 'MEXC ответил не JSON — вероятно, блокировка по региону', raw_response_preview: rawText.slice(0, 300) });
+    }
+    if (!Array.isArray(data)) return res.status(400).json({ error: 'MEXC отклонил запрос', detail: data.msg || JSON.stringify(data).slice(0,200) });
+    const row = data.find(c => (c.coin || '').toUpperCase() === coin);
+    if (!row) return res.json({ coin, dep: false, wd: false, note: 'монета не найдена на MEXC' });
+    const nets = row.networkList || [];
+    const dep = nets.some(n => n.depositEnable);
+    const wd = nets.some(n => n.withdrawEnable);
+    res.json({ coin, dep, wd });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
